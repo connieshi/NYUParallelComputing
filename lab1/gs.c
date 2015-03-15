@@ -31,6 +31,7 @@ int error_function(float *eval, int num);
 void make_a_scatter(int num, int comm_sz, int *num_send);
 
 /* These functions are used in serial version */
+int serial_version(int argc, char *argv[]);
 float linear_multiply(int pos);
 void solve_for_values();
 int error_function_serial();
@@ -220,6 +221,45 @@ void make_a_scatter(int num, int comm_sz, int *num_send) {
   free(a);
 }
 
+/*
+ * My serial version of the code before parallelizing.
+ */
+int serial_version(int argc, char *argv[]) {
+  temp = (float *)malloc(num * sizeof(float));
+  int i;
+  int nit = 0; /* number of iterations */
+  float *save;
+
+  // Find the x values, swap pointers when using new x as old x
+  do {
+    solve_for_values();
+    if (error_function_serial()) {
+      nit++;
+      memset(x, 0, num * sizeof(float));
+      save = x;
+      x = temp;
+      temp = save;
+    } else {
+      save = x;
+      x = temp;
+      temp = save;
+      break;
+    }
+  } while (1);
+
+  /* Writing to the stdout */
+  /* Keep that same format */
+  for (i = 0; i < num; i++) printf("%f\n", x[i]);
+
+  printf("total number of iterations: %d\n", nit);
+
+  free(temp);
+  MPI_Barrier(MPI_COMM_WORLD);
+  MPI_Finalize();
+
+  return 0;
+}
+
 int main(int argc, char *argv[]) {
   int i;
   int nit = 0; /* number of iterations */
@@ -372,43 +412,5 @@ int main(int argc, char *argv[]) {
   MPI_Barrier(MPI_COMM_WORLD);
   MPI_Finalize();
   
-  return 0;
-}
-/*
- * My serial version of the code before parallelizing.
- */
-int serial_version(int argc, char *argv[]) {
-  temp = (float *)malloc(num * sizeof(float));
-  int i;
-  int nit = 0; /* number of iterations */
-  float *save;
-
-  // Find the x values, swap pointers when using new x as old x
-  do {
-    solve_for_values();
-    if (error_function_serial()) {
-      nit++;
-      memset(x, 0, num * sizeof(float));
-      save = x;
-      x = temp;
-      temp = save;
-    } else {
-      save = x;
-      x = temp;
-      temp = save;
-      break;
-    }
-  } while (1);
-
-  /* Writing to the stdout */
-  /* Keep that same format */
-  for (i = 0; i < num; i++) printf("%f\n", x[i]);
-
-  printf("total number of iterations: %d\n", nit);
-
-  free(temp);
-  MPI_Barrier(MPI_COMM_WORLD);
-  MPI_Finalize();
-
   return 0;
 }
