@@ -129,11 +129,13 @@ void get_input(char filename[]) {
   /* The initial values of Xs */
   for (i = 0; i < num; i++) {
     fscanf(fp, "%f ", &x[i]);
+    //printf("%d %f\n",i, x[i]);
   }
 
   for (i = 0; i < num; i++) {
-    for (j = 0; j < num; j++) fscanf(fp, "%f ", &a[i][j]);
-
+    for (j = 0; j < num; j++) {
+		fscanf(fp, "%f ", &a[i][j]);
+	}
     /* reading the b element */
     fscanf(fp, "%f ", &b[i]);
   }
@@ -176,8 +178,6 @@ int error_function(float *eval, int num) {
 
   for (i = 0; i < num; i++) {
     cur_error = fabsf((eval[i] - x[i]) / eval[i]);
-    // cur_error *= 100; //Not multiply equation by 100
-    // printf("error %f\n", cur_error);
     if (cur_error > err) {
       return 1;
     }
@@ -192,8 +192,6 @@ int error_function_serial() {
 
   for (i = 0; i < num; i++) {
     cur_error = fabsf((temp[i] - x[i]) / temp[i]);
-    // cur_error *= 100; //Not multiply equation by 100
-    // printf("error %i %f %f\n", i, cur_error, err);
     if (cur_error > err) {
       return 1;
     }
@@ -205,68 +203,21 @@ int error_function_serial() {
  * a[] was allocated an array of pointers.
  * This function makes new_a[] an array of floats
  * To use the Scatter/Gather MPI functions
- * NOTE: The commented out section below is an
- * attempt at padding new_a[] with 0's
- * To allow Scatter/Gather even distribution...
  */
 void make_a_scatter(int num, int comm_sz, int *num_send) {
-  // int maxSend = MAX(num_send[0], num_send[comm_sz-1]);
-
   int i, j, k = 0;
   new_a = (float *)malloc(num * num * sizeof(float));
 
   for (i = 0; i < num; i++) {
     for (j = 0; j < num; j++) {
-      new_a[k++] = a[i][j];
+      new_a[k] = a[i][j];
+      k++;
       if (i == j) {
         aii[i] = a[i][j];
-        // printf("fuckshitcbals %f\n", aii[i]);
       }
     }
   }
   free(a);
-
-  /*
-  int k = 0;
-  int p=0, q=0;
-
-  if (num > comm_sz) {
-          printf("num>comm_sz");
-          int new_a_size = num*maxSend*(num-num%comm_sz);
-          new_a = (float*) malloc(new_a_size*sizeof(float));
-          memset(new_a, 0, new_a_size*sizeof(float));
-          for(i=0; i<comm_sz; i++) {
-                  memcpy(&new_a[j*num], &a[k], num*num_send[i]*sizeof(float));
-                  j+=maxSend;
-                  k+=num_send[i];
-          }
-          for(i=0; i<comm_sz; i++) {
-                  aii[i] = a[i][i];
-          }
-  } else if (num < comm_sz) {
-          printf("num<comm_sz");
-          for(i=0;i<num;i++) {
-                  for(j=0;j<num;j++) {
-                          new_a[k++] = a[i][j];
-                          if (i==j)
-                                  aii[i]=a[i][j];
-                                  //printf("%f\n", new_a[k-1]);
-                  }
-          }
-  } else {
-          new_a = (float*) malloc(num*num*sizeof(float));
-          printf("num=comm_sz");
-          for(i=0;i<num;i++) {
-                  for(j=0;j<num;j++) {
-                          new_a[k++] = a[i][j];
-                          if (i==j)
-                                  aii[i]=a[i][j];
-                                  //printf("%f\n", new_a[k-1]);
-                  }
-          }
-  }
-  free(a);
-  */
 }
 
 int main(int argc, char *argv[]) {
@@ -275,18 +226,17 @@ int main(int argc, char *argv[]) {
   int j, k;
   int comm_sz;
   int my_rank;
-  int total = 0;
   
   if (argc != 2) {
     printf("Usage: gsref filename\n");
     exit(1);
   }
 
-  /* Read the input file and fill the global data structure above */
+  // Read the input file and fill the global data structure above
   get_input(argv[1]);
   check_matrix();
 
-  /* Start MPI */
+  // Start MPI 
   MPI_Init(&argc, &argv);
   MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
   MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
@@ -296,22 +246,23 @@ int main(int argc, char *argv[]) {
     int exit = serial_version();
     return exit;
   }
-
+  
   int per_proc = num / comm_sz;
   int leftover = num % comm_sz;
   int num_send[comm_sz];
+  int num_send2[comm_sz];
   int findx[comm_sz][2];
-
-  /* Distributes the equations across processes */
-  for (i = 0; i < comm_sz; i++) {
-    int send = (leftover > i) ? per_proc + 1 : per_proc;
-    num_send[i] = send;
-  }
+  int total = 0;
 
   /* Used for Scatterv and Gatherv */
   int recvbuf[comm_sz];
+  int recvbuf2[comm_sz];
   int displacement[comm_sz];
+  int displacement2[comm_sz];
+  
   for (i = 0; i < comm_sz; i++) {
+	num_send[i] = (i < leftover) ? per_proc + 1 : per_proc;
+    num_send2[i] = num_send[i]*num;
 	//findx keeps track of the Xi values that each process
 	//is responsible for computing
     if (num_send[i] != 0) {
@@ -319,18 +270,16 @@ int main(int argc, char *argv[]) {
       findx[i][1] = total + num_send[i] - 1;
     }
     recvbuf[i] = num_send[i];
+    recvbuf2[i] = recvbuf[i]*num;
     displacement[i] = total;
+    displacement2[i] = displacement[i]*num;
     total += num_send[i];
   }
 
-  /* Use toSend to calculate the maximum number of equations
-   * Each process will receive from 0 */
-  int toSend = MAX(num_send[0], num_send[comm_sz - 1]);
-  
-  int num_el = toSend * num;
+  // Allocate temporary arrays for each process
   float *currX = (float *)malloc(num * sizeof(float));
-  float *tempX = (float *)malloc(toSend * sizeof(float));
-  float *tempA = (float *)malloc(num_el * sizeof(float));
+  float *tempX = (float *)malloc(num_send[my_rank] * sizeof(float));
+  float *tempA = (float *)malloc(num_send2[my_rank] * sizeof(float));
   float *tempB = (float *)malloc(num * sizeof(float));
   float *tempAii = (float *)malloc(num * sizeof(float));
 
@@ -346,8 +295,8 @@ int main(int argc, char *argv[]) {
   // Scatter and broadcast the appropriate values to use 
   MPI_Bcast(tempB, num, MPI_FLOAT, 0, MPI_COMM_WORLD);
   MPI_Bcast(tempAii, num, MPI_FLOAT, 0, MPI_COMM_WORLD);
-  MPI_Scatter(new_a, num * toSend, MPI_FLOAT, tempA, num * toSend, 
-	MPI_FLOAT, 0, MPI_COMM_WORLD);
+  MPI_Scatterv(new_a, num_send2, displacement2, MPI_FLOAT, tempA, 
+	recvbuf2[my_rank], MPI_FLOAT, 0, MPI_COMM_WORLD);
   MPI_Scatterv(x, num_send, displacement, MPI_FLOAT, tempX, 
 	recvbuf[my_rank], MPI_FLOAT, 0, MPI_COMM_WORLD);
 
@@ -363,10 +312,12 @@ int main(int argc, char *argv[]) {
       x[i] = currX[i];
     }
 
+	int getX = findx[my_rank][0];
+
 	// Evaluate for each Xi
     for (i = 0; i < num_send[my_rank]; i++) {
-      int getb = findx[my_rank][i];
-      tempX[i] = tempB[getb];
+      //int getb = findx[my_rank][i];
+      tempX[i] = tempB[getX];
 
 	  // Subtract all AiXi's from b
       for (j = 0; j < num; j++) {
@@ -375,16 +326,18 @@ int main(int argc, char *argv[]) {
 
 	  // tempX[i] already subtracted the Aii value in previous for-loop
 	  // So restore it by adding the Aii value
-      int getaii = findx[my_rank][i];
-      tempX[i] += tempAii[getaii] * x[getaii];
+      //int getaii = findx[my_rank][i];
+      tempX[i] += tempAii[getX] * x[getX];
       
       // Finally, divide by Aii
-      tempX[i] = tempX[i] / tempAii[getaii];
+      tempX[i] = tempX[i] / tempAii[getX];
+      
+      getX++;
     }
 
     MPI_Allgatherv(tempX, num_send[my_rank], MPI_FLOAT, currX, recvbuf,
-                   displacement, MPI_FLOAT, MPI_COMM_WORLD);
-
+		displacement, MPI_FLOAT, MPI_COMM_WORLD);
+	
     nit++;
   } while (error_function(currX, num));
 
